@@ -6,9 +6,9 @@
   <button onclick="table.addRow(randomItem())">Add random {{table['name']}} item</button>
 </div>
 
-<script src="/lib/underscore-min.js" integrity="sha512-HKvDCFVKg8ZPGjecy6on7UECEpE76Y86h3GaE4JMCz+deFWdjcW/tWnh0hCfaBvURvlOa9f5CNVzt7EFkulYbw==" crossorigin="anonymous"></script>
-<link href="/lib/tabulator.min.css" rel="stylesheet">
-<script type="text/javascript" src="/lib/tabulator.min.js"></script>
+<script src="/static/lib/underscore-min.js" integrity="sha512-HKvDCFVKg8ZPGjecy6on7UECEpE76Y86h3GaE4JMCz+deFWdjcW/tWnh0hCfaBvURvlOa9f5CNVzt7EFkulYbw==" crossorigin="anonymous"></script>
+<link href="/static/lib/tabulator.min.css" rel="stylesheet">
+<script type="text/javascript" src="/static/lib/tabulator.min.js"></script>
 
 <script>
 var tableName = {{ table['name']|tojson|safe }};
