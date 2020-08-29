@@ -21,7 +21,7 @@ function randomItem() {
 
   columns.forEach(function(column) {
     var type = types[column.type] || {'type': null, subvalues: []};
-    item[column.column] = _.sample(type.subvalues);
+    item[column.name] = _.sample(type.subvalues);
   });
 
   return item;
@@ -77,8 +77,8 @@ function columnEditor(column) {
 var tableColumns = columns.map(function(column) {
   var editor = columnEditor(column);
   return {
-    title: column.column,
-    field: column.column,
+    title: column.name,
+    field: column.name,
     formatter: editor.formatter,
     editor: editor.editor,
     editorParams: editor.params,

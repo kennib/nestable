@@ -5,12 +5,6 @@ from pypika import Query, Table, Columns
 
 from collections import defaultdict
 
-def create_model_table():
-  model_table = Table('model')
-  model_columns = Columns(('nestable', 'VARCHAR(120)'), ('column', 'VARCHAR(120)'), ('datatype', 'VARCHAR(120)'))
-  q = Query.create_table(model_table).columns(*model_columns)
-  return str(q)
-
 def create_data_table():
   data_table = Table('data')
   data_columns = Columns(('nestable', 'VARCHAR(120)'), ('column', 'VARCHAR(120)'), ('row', 'VARCHAR(120)'), ('data', 'JSON'))
@@ -23,7 +17,6 @@ def init(conn):
   
   # Create tables
   try:
-    c.execute(create_model_table())
     c.execute(create_data_table())
   except sqlite3.OperationalError:
     pass
@@ -53,15 +46,18 @@ GROUP BY type
 '''
 
 TABLES_QUERY = '''
-SELECT nestable AS 'table'
-FROM model
-GROUP BY nestable
+SELECT data AS 'table'
+FROM data
+WHERE nestable = 'table'
+AND column = 'name'
 '''
 
 COLUMN_QUERY = '''
-SELECT nestable AS 'table', column, datatype AS type
-FROM model
-WHERE nestable = ?
+SELECT json_group_object(column, data) AS column
+FROM data
+WHERE nestable = 'column'
+GROUP BY row
+ORDER BY ROWID
 '''
 
 ROW_DELETE = '''
@@ -118,13 +114,20 @@ def get_types(conn):
 
 def get_table(conn, table=None):
   c = conn.cursor()
-  columns = c.execute(COLUMN_QUERY, (table,)).fetchall()
+  columns = c.execute(COLUMN_QUERY).fetchall()
+  columns = [json.loads(column['column']) for column in columns]
+  columns = [column for column in columns if column['table'] == table]
   cell_data = c.execute(query_data(table)).fetchall()
 
   # Store in dict[row][column] format
   row_data = defaultdict(dict)
   for id, cell in enumerate(cell_data):
-    row_data[cell['row']][cell['column']] = json.loads(cell['data'])
+    try:
+      data = json.loads(cell['data'])
+    except:
+      data = cell['data']
+
+    row_data[cell['row']][cell['column']] = data
   
   # Add the id to each row
   for id, row in enumerate(row_data):
