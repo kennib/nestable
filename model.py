@@ -28,9 +28,9 @@ def init(conn):
 TYPES_QUERY = '''
 WITH RECURSIVE
   subvalues(type, id, value) AS (
-    SELECT data.nestable, data.row, json_group_object(data.column, data.data)
+    SELECT nestable, row, json_group_object(json_extract(column, '$.id'), data)
     FROM data
-    GROUP BY data.row
+    GROUP BY row
   ),
   all_subvalues(type) AS (
     SELECT type
@@ -48,14 +48,22 @@ GROUP BY type
 TABLES_QUERY = '''
 SELECT data AS 'table'
 FROM data
-WHERE nestable = 'table'
-AND column = 'name'
+WHERE json_extract(nestable, '$.id') = 'table'
+AND json_extract(column, '$.id') = 'name'
 '''
 
 COLUMN_QUERY = '''
-SELECT json_group_object(column, data) AS column
+SELECT json_group_object(json_extract(column, '$.id'), data) AS column
 FROM data
-WHERE nestable = 'column'
+WHERE json_extract(nestable, '$.id') = 'column'
+GROUP BY row
+ORDER BY ROWID
+'''
+
+DATA_QUERY = '''
+SELECT row AS id, json_group_object(json_extract(column, '$.id'), data) AS data
+FROM data
+WHERE json_extract(nestable, '$.id') = ?
 GROUP BY row
 ORDER BY ROWID
 '''
@@ -75,12 +83,6 @@ CELL_UPDATE = '''
 INSERT OR REPLACE INTO data
 VALUES(?, ?, ?, ?)
 '''
-
-def query_data(table=None):
-  data = Table('data')
-  q = Query.from_(data).select(data.nestable, data.column, data.row, data.data)
-  q = q.where(data.nestable == table) if table else q
-  return str(q)
 
 def get_types(conn):
   c = conn.cursor()
@@ -104,11 +106,13 @@ def get_types(conn):
   # Format as a dictionary of {types: type dictionaries}
   types = {}
   for row in type_rows:
-    types[row['type']] = row
-  
-  # The type table contains types
-  types.update({t['type']: t for t in types['type']['subvalues']})
+    type = row['type']['id']
+    types[type] = row
 
+  # Add the types subtable as individual types
+  for type in types['type']['subvalues']:
+    types[type['id']] = type
+  
   return types
 
 
@@ -117,22 +121,18 @@ def get_table(conn, table=None):
   columns = c.execute(COLUMN_QUERY).fetchall()
   columns = [json.loads(column['column']) for column in columns]
   columns = [column for column in columns if column['table'] == table]
-  cell_data = c.execute(query_data(table)).fetchall()
+  data = c.execute(DATA_QUERY, (table,)).fetchall()
 
   # Store in dict[row][column] format
   row_data = defaultdict(dict)
-  for id, cell in enumerate(cell_data):
+  for row in data:
     try:
-      data = json.loads(cell['data'])
+      data = json.loads(row['data'])
     except:
-      data = cell['data']
+      data = row['data']
 
-    row_data[cell['row']][cell['column']] = data
+    row_data[row['id']] = data
   
-  # Add the id to each row
-  for id, row in enumerate(row_data):
-    row_data[row]['id'] = row
-
   return {'name': table, 'data': row_data, 'columns': columns}
 
 def get_tables(conn):
