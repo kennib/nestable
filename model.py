@@ -5,73 +5,39 @@ from pypika import Query, Table, Columns
 
 from collections import defaultdict
 
-def create_data_table():
-  data_table = Table('data')
-  data_columns = Columns(('nestable', 'VARCHAR(120)'), ('column', 'VARCHAR(120)'), ('row', 'VARCHAR(120)'), ('data', 'JSON'))
-  q = Query.create_table(data_table).columns(*data_columns)
-  return str(q)
-
 def init(conn):
   # Create a cursor for the results
   c = conn.cursor()
   
-  # Create tables
-  try:
-    c.execute(create_data_table())
-  except sqlite3.OperationalError:
-    pass
+  # Create default tables
+  import os
+  cmd = 'sqlite3 nestable.db < "schema.sql"'
+  os.system(cmd)
+  #cmd = 'sqlite3 nestable.db <<< ".separator \",\"\n.import data.csv data"'
+  #os.system(cmd)
 
   # Save
   conn.commit()
 
-
-TYPES_QUERY = '''
-WITH RECURSIVE
-  subvalues(type, id, value) AS (
-    SELECT nestable, row, json_group_object(json_extract(column, '$.id'), data)
-    FROM data
-    GROUP BY row
-  ),
-  all_subvalues(type) AS (
-    SELECT type
-    FROM subvalues
-      UNION ALL
-    SELECT type
-    FROM subvalues
-    JOIN all_subvalues USING(type)
-  )
-SELECT type, json_group_array(json_insert(value, '$.id', id)) AS subvalues
-FROM subvalues
-GROUP BY type
-'''
-
-TABLES_QUERY = '''
-SELECT data AS 'table'
+DATA_QUERY = '''
+SELECT json_insert(json_insert(json_group_object(column, data), '$.id',id), '$.nestable', nestable) AS 'row'
 FROM data
-WHERE json_extract(nestable, '$.id') = 'table'
-AND json_extract(column, '$.id') = 'name'
-'''
-
-COLUMN_QUERY = '''
-SELECT json_group_object(json_extract(column, '$.id'), data) AS column
-FROM data
-WHERE json_extract(nestable, '$.id') = 'column'
-GROUP BY row
+GROUP BY id
 ORDER BY ROWID
 '''
 
-DATA_QUERY = '''
-SELECT row AS id, json_group_object(json_extract(column, '$.id'), data) AS data
+NESTABLE_QUERY = '''
+SELECT json_insert(json_group_object(column, data), '$.id',id) AS 'row'
 FROM data
-WHERE json_extract(nestable, '$.id') = ?
-GROUP BY row
+WHERE nestable = ?
+GROUP BY id
 ORDER BY ROWID
 '''
 
 ROW_DELETE = '''
 DELETE FROM data
-WHERE nestable = ?
-AND row = ?
+WHERE id = ?
+AND nestable = ?
 '''
 
 CELL_ADD = '''
@@ -84,65 +50,39 @@ INSERT OR REPLACE INTO data
 VALUES(?, ?, ?, ?)
 '''
 
-def get_types(conn):
+def get_nestables(conn, builtins=False):
   c = conn.cursor()
-  type_rows = c.execute(TYPES_QUERY).fetchall()
-  
-  # Load JSON in types
-  def load_json(value):
-    for key in value:
-      try:
-        value[key] = json.loads(value[key])
-      except:
-        pass
-    
-    if 'subvalues' in value:
-      for subvalue in value['subvalues']:
-        load_json(subvalue)
-  
-  for row in type_rows:
-    load_json(row)
+  nestable_rows = c.execute(NESTABLE_QUERY, ('nestable',)).fetchall()
+  nestables_list = [json.loads(row['row']) for row in nestable_rows]
+  nestables_dict = {nestable['id']: nestable for nestable in nestables_list}
 
-  # Format as a dictionary of {types: type dictionaries}
-  types = {}
-  for row in type_rows:
-    type = row['type']['id']
-    types[type] = row
+  if builtins:
+    builtin_rows = get_nestable_data(conn, 'builtin-nestable')
+    builtins = {row['builtin-nestable-name']: json.loads(row['builtin-nestable-value']) for row in builtin_rows}
+    nestables_dict.update(builtins)
 
-  # Add the types subtable as individual types
-  for type in types['type']['subvalues']:
-    types[type['id']] = type
-  
-  return types
+  return nestables_dict
 
-
-def get_table(conn, table=None):
+def get_data(conn):
   c = conn.cursor()
-  columns = c.execute(COLUMN_QUERY).fetchall()
-  columns = [json.loads(column['column']) for column in columns]
-  columns = [column for column in columns if column['table'] == table]
-  data = c.execute(DATA_QUERY, (table,)).fetchall()
+  rows = c.execute(DATA_QUERY).fetchall()
+  data = [json.loads(row['row']) for row in rows]
+  return data 
 
-  # Store in dict[row][column] format
-  row_data = defaultdict(dict)
-  for row in data:
-    try:
-      data = json.loads(row['data'])
-    except:
-      data = row['data']
-
-    row_data[row['id']] = data
-  
-  return {'name': table, 'data': row_data, 'columns': columns}
-
-def get_tables(conn):
+def get_nestable_data(conn, nestable):
   c = conn.cursor()
-  tables = c.execute(TABLES_QUERY).fetchall()
+  nestable_rows = c.execute(NESTABLE_QUERY, (nestable,)).fetchall()
+  nestables_list = [json.loads(row['row']) for row in nestable_rows]
+  return nestables_list
 
-  return tables
+def get_columns(conn):
+  c = conn.cursor()
+  column_rows = c.execute(NESTABLE_QUERY, ('column',)).fetchall()
+  columns_list = [json.loads(row['row']) for row in column_rows]
+  columns_dict = {column['id']: column for column in columns_list}
+  return columns_dict 
 
-
-def add_row(conn, table, row):
+def add_row(conn, nestable, row):
   c = conn.cursor()
 
   # Generate an ID for the row if it doesn't have one
@@ -151,25 +91,26 @@ def add_row(conn, table, row):
 
   # Add the data for each column
   for column, datum in row.items():
-    c.execute(CELL_ADD, (table, column, row['id'], json.dumps(datum)))
+    if column != 'id':
+      c.execute(CELL_ADD, (row['id'], nestable, column, datum))
   
   conn.commit()
 
   return row
 
-def delete_row(conn, table, row):
+def delete_row(conn, nestable, row):
   c = conn.cursor()
 
   # Delete the row
-  c.execute(ROW_DELETE, (table, row['id']))
+  c.execute(ROW_DELETE, (row['id'], nestable))
   
   conn.commit()
 
-def update_cell(conn, table, row, column, datum):
+def update_cell(conn, id, nestable, column, datum):
   c = conn.cursor()
 
   # Update the data for the cell
-  c.execute(CELL_UPDATE, (table, column, row, json.dumps(datum)))
+  c.execute(CELL_UPDATE, (id, nestable, column, datum))
   
   conn.commit()
 

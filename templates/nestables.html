@@ -1,0 +1,9 @@
+<h2>Nestables</h2>
+
+<ul>
+  {% for nestable in nestables.values() %}
+    <li>
+      <a href="/nestable/{{ nestable.id }}">{{ nestable['nestable-name'] }}</a>
+    </li>
+  {% endfor %}
+</ul>

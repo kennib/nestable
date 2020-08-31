@@ -28,35 +28,37 @@ def initialise():
     #example_data.create(db)
     db.commit()
 
-@app.route('/api/table/row', methods=['POST'])
+@app.route('/api/nestable/row', methods=['POST'])
 def add_row():
   data = request.json
-  row = model.add_row(get_db(), data['table'], data['row'])
+  row = model.add_row(get_db(), data['nestable'], data['row'])
   return {'success': True, 'row': row}
 
-@app.route('/api/table/row', methods=['DELETE'])
+@app.route('/api/nestable/row', methods=['DELETE'])
 def delete_row():
   data = request.json
-  model.delete_row(get_db(), data['table'], data['row'])
+  model.delete_row(get_db(), data['nestable'], data['row'])
   return {'success': True}
 
-@app.route('/api/table/cell', methods=['PATCH'])
-def update_row():
+@app.route('/api/nestable/cell', methods=['PATCH'])
+def update_cell():
   data = request.json
-  model.update_cell(get_db(), data['table'], data['row'], data['column'], data['datum'])
+  model.update_cell(get_db(), data['id'], data['nestable'], data['column'], data['datum'])
   return {'success': True}
+
 
 @app.route('/')
 def tables():
-  types = model.get_types(get_db())
-  tables = model.get_tables(get_db())
-  return render_template('tables.html', types=types, tables=tables)
+  nestables = model.get_nestables(get_db())
+  return render_template('nestables.html', nestables=nestables)
 
-@app.route('/table/<table>')
-def table(table=None):
-  types = model.get_types(get_db())
-  table_data = model.get_table(get_db(), table)
-  return render_template('table.html', types=types, table=table_data)
+@app.route('/nestable/<nestable_id>')
+def nestable(nestable_id=None):
+  nestables = model.get_nestables(get_db(), builtins=True)
+  nestable = nestables.get(nestable_id)
+  columns = model.get_columns(get_db())
+  data = model.get_data(get_db())
+  return render_template('nestable.html', nestable=nestable, nestables=nestables, columns=columns, data=data)
 
 initialise()
 app.run(host='0.0.0.0', port=8080, debug=True)
