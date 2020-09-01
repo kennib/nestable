@@ -1,5 +1,8 @@
 <h2>{{ nestable['nestable-name'] }}</h2>
 
+<div>
+  <button onclick="editColumns()">Edit columns</button>
+</div>
 <div id="table"></div>
 <div>
   <button onclick="table.addRow()">Add empty {{ nestable['nestable-id'] }} item</button>
@@ -9,6 +12,9 @@
 <script src="/static/lib/underscore-min.js" integrity="sha512-HKvDCFVKg8ZPGjecy6on7UECEpE76Y86h3GaE4JMCz+deFWdjcW/tWnh0hCfaBvURvlOa9f5CNVzt7EFkulYbw==" crossorigin="anonymous"></script>
 <link href="/static/lib/tabulator.min.css" rel="stylesheet">
 <script type="text/javascript" src="/static/lib/tabulator.min.js"></script>
+<link href="/static/lib/vex.css" rel="stylesheet" />
+<link href="/static/lib/vex-theme-os.css" rel="stylesheet" />
+<script type="text/javascript" src="/static/lib/vex.combined.min.js"></script>
 
 <script>
 var nestable = {{ nestable|tojson|safe }};
@@ -31,21 +37,50 @@ _.each(nestables, function(nestable, id) {
   }
 });
 
-// Get the nestable's columns
-var nestableColumns = _.values(columns)
-  .filter(function(column) {
-    return column['column-nestable'] == nestable.id;
-  })
+function editColumns() {
+  var modalTable;
+  vex.dialog.confirm({
+    className: 'vex-theme-os',
+    message: 'Edit columns',
+    input: '<div id="modal-table"></div><button>Add column</button>',
+    overlayClosesOnClick: false,
+    afterOpen: function() {
+      // Add column button
+      var button = document.querySelector('.vex-dialog-input > button');
+      button.onclick = function(event) {
+        event.preventDefault();
+        modalTable.addRow({'column-nestable': nestable.id})
+      };
 
-// Get the nestable's data
-var nestableData = data.filter(function(row) {
-  return row.nestable == nestable.id;
-});
-
+      // Add the column editor
+      modalTable = createTable({
+        element: '#modal-table',
+        height: '300px',
+        nestable: {id: 'column'},
+        data: data.filter(function(row) {
+          return row['column-nestable'] == nestable.id;
+        }),
+      }); 
+    },
+    callback: function(confirmed) {
+      if (confirmed) {
+        // TODO update column data
+        location.reload();
+      }
+    },
+  });
+}
 
 function randomItem() {
   var item = {};
 
+  // Get the nestable's columns
+  var nestableColumns = _.values(columns)
+    .filter(function(column) {
+      return column['column-nestable'] == nestable.id;
+    });
+
+  // Get a random value for each column
   nestableColumns.forEach(function(column) {
     var nestableId = column['column-nestable-values'];
     var nestable = nestables[nestableId] || {};
@@ -113,79 +148,106 @@ function columnEditor(column) {
   }
 }
 
-// Format columns for the Tabulator table
-var tableColumns = nestableColumns 
-  .map(function(column) {
-    var editor = columnEditor(column);
-    return {
-      title: column['column-name'],
-      field: column.id,
-      formatter: editor.formatter,
-      editor: editor.editor,
-      editorParams: editor.params,
-    };
-  });
+function createTable(opts) {
+  opts = opts || {};
+  var element = opts.element;
+  var nestable = opts.nestable;
+  var deleteControls = opts.deleteControls != undefined ? deleteControls : true;
+  var data = opts.data || [];
 
-// Add a column with a delete row button
-tableColumns.push({
-  title: 'Delete Row',
-  formatter:"buttonCross",
-  align: 'center',
-  cellClick:function(e, cell) {
-    cell.getRow().delete();
-  }
-});
+  // Get the nestable's columns
+  var nestableColumns = _.values(columns)
+    .filter(function(column) {
+      return column['column-nestable'] == nestable.id;
+    });
 
-var table = new Tabulator('#table', {
-  height: '600px',
-  data: nestableData,
-  nestedFieldSeparator: ' ',
-  columns: tableColumns,
-  rowAdded: function(row) {
-    fetch('/api/nestable/row', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        nestable: nestable.id,
-        row: row.getData(),
-      })
-    }).then(function(response) {
-      return response.json();
-    }).then(function(data) {
-      // Update with a generated row ID if it doesn't already have one
-      if (!row.getData().id) {
-        var id = data.row.id;
-        row.update({'id': id});
+  // Format columns for the Tabulator table
+  var tableColumns = nestableColumns 
+    .map(function(column) {
+      var editor = columnEditor(column);
+      return {
+        title: column['column-name'],
+        field: column.id,
+        formatter: editor.formatter,
+        editor: editor.editor,
+        editorParams: editor.params,
+      };
+    });
+
+  // Add a column with a delete row button
+  if (deleteControls) {
+    tableColumns.push({
+      title: 'Delete Row',
+      formatter:"buttonCross",
+      align: 'center',
+      cellClick:function(e, cell) {
+        cell.getRow().delete();
       }
     });
-  },
-  rowDeleted: function(row) {
-    fetch('/api/nestable/row', {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        nestable: nestable.id,
-        row: row.getData(),
-      })
-    });
-  },
-  cellEdited: function(cell) {
-    fetch('/api/nestable/cell', {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        id: cell.getRow().getData()['id'],
-        nestable: nestable.id,
-        column: cell.getField(),
-        datum: cell.getValue(),
-      })
-    });
-  },
+  }
+
+  var table = new Tabulator(element, {
+    height: opts.height,
+    data: data,
+    nestedFieldSeparator: ' ',
+    columns: tableColumns,
+    rowAdded: function(row) {
+      fetch('/api/nestable/row', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          nestable: nestable.id,
+          row: row.getData(),
+        })
+      }).then(function(response) {
+        return response.json();
+      }).then(function(data) {
+        // Update with a generated row ID if it doesn't already have one
+        if (!row.getData().id) {
+          var id = data.row.id;
+          row.update({'id': id});
+        }
+      });
+    },
+    rowDeleted: function(row) {
+      fetch('/api/nestable/row', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          nestable: nestable.id,
+          row: row.getData(),
+        })
+      });
+    },
+    cellEdited: function(cell) {
+      fetch('/api/nestable/cell', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: cell.getRow().getData()['id'],
+          nestable: nestable.id,
+          column: cell.getField(),
+          datum: cell.getValue(),
+        })
+      });
+    },
+  });
+
+  return table;
+}
+
+var table = createTable({
+  element: '#table',
+  height: '600px',
+  nestable: nestable,
+  data: data.filter(function(row) {
+    return row.nestable == nestable.id;
+  }),
 });
 </script>

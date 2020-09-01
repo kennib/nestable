@@ -10,7 +10,7 @@ column-name,column,column-nestable,column
 column-name,column,column-name,name
 column-name,column,column-nestable-values,text
 column-nestable-values,column,column-nestable,column
-column-nestable-values,column,column-name,nestable
+column-nestable-values,column,column-name,values
 column-nestable-values,column,column-nestable-values,nestable
 builtin-nestable,nestable,nestable-name,builtin-nestable
 builtin-nestable-name,column,column-nestable,builtin-nestable
